@@ -77,7 +77,7 @@ def _try_lik(backend: str, *tensors: torch.Tensor) -> bool:
         if backend == "lik":
             raise RuntimeError(
                 "backend='lik' requested but `late-interaction-kernels` is not "
-                'installed; run `pip install "pylate[lik]`'
+                'installed; run `pip install "pylate[lik]"`'
             )
         return False
     return True
