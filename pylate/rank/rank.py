@@ -124,6 +124,14 @@ def rerank(
             for query_document_embeddings in query_documents_embeddings
         ]
 
+        # Build the real-length document mask before padding so padded slots
+        # are excluded from MaxSim instead of flooring each query-token max
+        # at 0 (see pylate.scores.colbert.colbert_scores).
+        doc_lengths = torch.tensor(
+            [len(document) for document in query_documents_embeddings],
+            dtype=torch.long,
+        )
+
         # Pad the documents embeddings
         query_documents_embeddings = torch.nn.utils.rnn.pad_sequence(
             query_documents_embeddings, batch_first=True, padding_value=0
@@ -137,9 +145,18 @@ def rerank(
                 query_embeddings.device
             )
 
+        doc_mask = (
+            torch.arange(
+                query_documents_embeddings.shape[1],
+                device=query_documents_embeddings.device,
+            ).unsqueeze(0)
+            < doc_lengths.unsqueeze(1)
+        ).to(query_documents_embeddings.dtype)
+
         query_scores = colbert_scores(
             queries_embeddings=query_embeddings.unsqueeze(0),
             documents_embeddings=query_documents_embeddings,
+            documents_mask=doc_mask,
         )[0]
 
         scores, sorted_indices = torch.sort(input=query_scores, descending=True)
@@ -174,7 +191,7 @@ def score_xtr(
     ----------
     query_doc_ids
         List of length q_tok, where each element is a list of k_token document IDs
-        retrieved for that query token.
+        retrieved for each query token.
     query_scores
         List of length q_tok, where each element is a list of k_token scores
         corresponding to the retrieved document IDs.
@@ -208,9 +225,9 @@ def score_xtr(
     ...     [0.9, 0.7, 0.5],  # Scores for query token 0
     ...     [0.8, 0.6, 0.4],  # Scores for query token 1
     ... ]
-    >>> results = score_xtr(query_doc_ids, query_scores, k=3)
+    >>> results = score_xtr(query_doc_ids, k=3)
     >>> assert len(results) == 3
-    >>> assert results[0]["id"] == "doc2"  # Has high scores for both tokens
+    >>> assert results[0]["id"] == "doc2"  # Has high scores from both tokens
 
     """
     if len(query_doc_ids) != len(query_scores):

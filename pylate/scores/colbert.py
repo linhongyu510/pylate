@@ -77,7 +77,7 @@ def _try_lik(backend: str, *tensors: torch.Tensor) -> bool:
         if backend == "lik":
             raise RuntimeError(
                 "backend='lik' requested but `late-interaction-kernels` is not "
-                'installed; run `pip install "pylate[lik]"`'
+                'installed; run `pip install "pylate[lik]`'
             )
         return False
     return True
@@ -192,12 +192,27 @@ def colbert_scores(
         documents_embeddings,
     )
 
-    if queries_mask is not None:
-        scores = scores * queries_mask.unsqueeze(1).unsqueeze(3)
-
     if documents_mask is not None:
-        scores = scores * documents_mask.unsqueeze(0).unsqueeze(2)
-    scores = scores.max(axis=-1).values.sum(axis=-1)
+        # Padded document tokens must be excluded from the max, not zeroed:
+        # zeroing floors every query-token max at 0, so padding wins whenever
+        # a query token's real similarities are all negative. -inf masking
+        # keeps the flash/LIK backends (which mask by length) numerically
+        # equivalent on padded inputs.
+        scores = scores.masked_fill(
+            documents_mask.unsqueeze(0).unsqueeze(2) == 0, float("-inf")
+        )
+
+    maxima = scores.max(axis=-1).values
+
+    if queries_mask is not None:
+        # Padded query tokens must contribute exactly 0 to the sum. Do this
+        # AFTER the max: multiplying pre-max scores either leaks -inf into
+        # the sum (query row zeroed but the document fully padded -> max is
+        # -inf) or yields NaN (0 * -inf) if applied after the doc mask.
+        keep = queries_mask.unsqueeze(1).to(torch.bool)
+        maxima = torch.where(keep, maxima, torch.zeros((), dtype=maxima.dtype))
+
+    scores = maxima.sum(axis=-1)
     return scores
 
 
@@ -379,13 +394,20 @@ def colbert_kd_scores(
         documents_embeddings,
     )
 
-    if queries_mask is not None:
-        scores = scores * queries_mask.unsqueeze(1).unsqueeze(3)
-
     if documents_mask is not None:
-        scores = scores * documents_mask.unsqueeze(2)
+        # Exclude padded document tokens from the max (see colbert_scores):
+        # zeroing would floor each query-token max at 0.
+        scores = scores.masked_fill(documents_mask.unsqueeze(2) == 0, float("-inf"))
 
-    scores = scores.max(axis=-1).values.sum(axis=-1)
+    maxima = scores.max(axis=-1).values
+
+    if queries_mask is not None:
+        # Padded query tokens contribute exactly 0 (after the max, see
+        # colbert_scores): avoids both -inf leakage and 0 * -inf NaN.
+        keep = queries_mask.unsqueeze(1).to(torch.bool)
+        maxima = torch.where(keep, maxima, torch.zeros((), dtype=maxima.dtype))
+
+    scores = maxima.sum(axis=-1)
     return scores
 
 
