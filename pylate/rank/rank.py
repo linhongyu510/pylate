@@ -191,7 +191,7 @@ def score_xtr(
     ----------
     query_doc_ids
         List of length q_tok, where each element is a list of k_token document IDs
-        retrieved for each query token.
+        retrieved for that query token.
     query_scores
         List of length q_tok, where each element is a list of k_token scores
         corresponding to the retrieved document IDs.
@@ -225,9 +225,9 @@ def score_xtr(
     ...     [0.9, 0.7, 0.5],  # Scores for query token 0
     ...     [0.8, 0.6, 0.4],  # Scores for query token 1
     ... ]
-    >>> results = score_xtr(query_doc_ids, k=3)
+    >>> results = score_xtr(query_doc_ids, query_scores, k=3)
     >>> assert len(results) == 3
-    >>> assert results[0]["id"] == "doc2"  # Has high scores from both tokens
+    >>> assert results[0]["id"] == "doc2"  # Has high scores for both tokens
 
     """
     if len(query_doc_ids) != len(query_scores):
